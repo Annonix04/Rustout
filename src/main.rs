@@ -311,11 +311,12 @@ fn block_collision(mut blocks: Query<(Entity, &Transform), With<Block>>,
 fn game_win(blocks: Query<&Block>,
             mut commands: Commands,
             mut time: ResMut<Time<Virtual>>,
+            gameover: Query<&GameOver>,
             score: Query<Entity, With<Score>>,
             ball: Query<Entity, With<Ball>>,
             player: Query<Entity, With<Player>>) {
 
-    if blocks.is_empty() {
+    if blocks.is_empty() && !gameover.single().unwrap().0 {
         time.pause(); // Pause the game when all blocks are destroyed
         commands.spawn((
             GameWinText,
