@@ -1,8 +1,19 @@
 use std::fmt::Display;
 use bevy::prelude::*;
 use bevy::window::ExitCondition;
-use bevy::window::CursorOptions;
 use rand::Rng;
+
+#[derive(Default, Clone, Eq, PartialEq, Hash)]
+enum GameState {
+    #[default]
+    Playing,
+    Paused,
+    GameOver,
+    GameWin,
+}
+
+#[derive(Event)]
+struct DespawnEvent;
 
 #[derive(Component)]
 struct Player; // Represents the player entity
@@ -19,6 +30,9 @@ struct Velocity(Vec2);
 
 #[derive(Component)]
 struct Score(u32); // Represents the player's score
+
+#[derive(Component)]
+struct DespawnOnGameOver;
                    
 #[derive(Component)]
 struct PauseText;
@@ -29,11 +43,8 @@ struct GameOverText;
 #[derive(Component)]
 struct GameWinText;
 
-#[derive(Component)]
-struct GameOver(bool);
-
-#[derive(Component)]
-struct GamePause(bool);
+#[derive(Resource, Default)]
+struct State(GameState); // Holds the current game state
 
 impl Display for Score {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -46,6 +57,8 @@ const WINDOW_WIDTH: f32 = 1000.0;
 const WINDOW_HEIGHT: f32 = 700.0;
 const PLAYER_SIZE: f32 = 200.0;
 const PLAYER_WIDTH: f32 = 15.0; // Thickness of the player paddle
+const BLOCK_HEIGHT: f32 = WINDOW_HEIGHT / 20.0; // Height of each blocks
+const BLOCK_WIDTH: f32 = WINDOW_WIDTH / 6.0; // Width of each block
 const BALL_SIZE: f32 = 20.0;
 
 fn main() {
@@ -62,6 +75,8 @@ fn main() {
             ..default()
         }))
         .insert_resource(ClearColor(Color::srgb(0.4, 0.4, 0.4))) // Set the background color
+        .insert_resource(State(GameState::Playing)) // Initialize the game state
+        .add_event::<DespawnEvent>() // Add a custom event for despawning entities
         .add_systems(Startup, (spawn_camera,
                                spawn_map,
                                spawn_blocks)) // Startup runs once on launch
@@ -69,15 +84,16 @@ fn main() {
                               ball_movement,
                               ball_collision,
                               block_collision,
+                              state_handler, // Handle game state changes
+                              despawn_handler, // Handle despawning entities
                               pause_game,
                               game_win,
-                              game_over.after(game_win))) // Update runs every frame
+                              game_over)) // Update runs every frame
         .run();
 }
 
 fn spawn_camera(mut commands: Commands) {
     commands.spawn(Camera2d::default()); // Spawn a 2D camera
-    CursorOptions::default().visible = false;
 }
 
 fn spawn_map(mut commands: Commands,
@@ -95,6 +111,7 @@ fn spawn_map(mut commands: Commands,
     // Spawn the player at the bottom of the window
     commands.spawn((
         Player,
+        DespawnOnGameOver, // This component will be used to despawn the player on game over
         Transform::from_xyz(0.0, WINDOW_HEIGHT / -2.0 + 50.0, 0.0), 
         Mesh2d(player_mesh),
         MeshMaterial2d(player_material),
@@ -103,6 +120,7 @@ fn spawn_map(mut commands: Commands,
     // Spawn the ball at the center of the window with an initial downward velocity
     commands.spawn((
         Ball,
+        DespawnOnGameOver, // This component will be used to despawn the ball on game over
         Transform::from_xyz(0.0, 0.0, 0.0), // Center of the window
         Velocity(Vec2::new(0.0, -400.0)), // Initial velocity
         Mesh2d(ball_mesh),
@@ -112,6 +130,7 @@ fn spawn_map(mut commands: Commands,
     // Spawn the score text in the top right corner
     commands.spawn((
         Score(0),
+        DespawnOnGameOver, // This component will be used to despawn the score text on game over
         Text2d::new("Score: 0"),
         Transform::from_xyz(WINDOW_WIDTH / 2.0 - 100.0, WINDOW_HEIGHT / -2.0 + 25.0, 0.0),
         TextFont {
@@ -119,23 +138,22 @@ fn spawn_map(mut commands: Commands,
             ..default()
         },
     ));
-    commands.spawn(GameOver(false));
-    commands.spawn(GamePause(false));
 }
 
 fn player_movement(mut pos: Query<&mut Transform, With<Player>>,
-                   pause: Query<&GamePause>,
+                   state: Res<State>,
                    keyboard_input: Res<ButtonInput<KeyCode>>) {
 
-    let paused = if let Ok(paused) = pause.single() { paused.0 } else { false };
+    let playing = state.0 == GameState::Playing; // Check if the game is in playing state
+
     for mut transform in pos.iter_mut() {
         if keyboard_input.pressed(KeyCode::KeyA)
-            && !paused // Check if the game is not paused
+            && playing
             && transform.translation.x > WINDOW_WIDTH / -2.0 + PLAYER_SIZE * 0.75 {
             transform.translation.x -= 5.0; // Move left
         }
         if keyboard_input.pressed(KeyCode::KeyD)
-            && !paused
+            && playing
             && transform.translation.x < WINDOW_WIDTH / 2.0 - PLAYER_SIZE * 0.75 {
             transform.translation.x += 5.0; // Move right
         }
@@ -144,12 +162,13 @@ fn player_movement(mut pos: Query<&mut Transform, With<Player>>,
 
 fn ball_movement(mut ball: Query<(&mut Transform, &mut Velocity), With<Ball>>,
                  time: Res<Time>,
-                 pause: Query<&GamePause>,){
+                 state: Res<State>,){
+
+    let playing = state.0 == GameState::Playing;
 
     for (mut transform, mut vel) in ball.iter_mut() {
         // Update position
-        let paused = if let Ok(paused) = pause.single() { paused.0 } else { false };
-        if !paused {
+        if playing {
             // Only update position if the game is not paused
             transform.translation.x += vel.0.x * time.delta_secs();
             transform.translation.y += vel.0.y * time.delta_secs();
@@ -191,20 +210,13 @@ fn ball_collision(mut balls: Query<(&Transform, &mut Velocity), With<Ball>>,
 // End game if ball hits bottom of screen
 fn game_over(mut commands: Commands,
              score: Query<&Score>,
-             ball_entity: Query<Entity, With<Ball>>, 
-             player_entity: Query<Entity, With<Player>>, 
-             block_entity: Query<Entity, With<Block>>,
-             text: Query<Entity, With<Text2d>>,
-             mut gameover: Query<&mut GameOver>,
+             mut state: ResMut<State>,
              transform: Query<&Transform, With<Ball>>) {
 
         for ball_tf in transform.iter() {
         if ball_tf.translation.y < -WINDOW_HEIGHT / 2.0 + BALL_SIZE / 2.0 {
 
-            gameover.single_mut().unwrap().0 = true; // Set game over state
-            for entity in text.iter() {
-                commands.entity(entity).despawn(); // Remove score text
-            }
+            state.0 = GameState::GameOver; // Set game state to GameOver
            if let Ok(score) = score.single() {
                 commands.spawn((
                     Text2d::new(format!("Game Over!\nYour Score: {}", score.0)),
@@ -214,40 +226,26 @@ fn game_over(mut commands: Commands,
                     },
                 ));
             } 
-            for entity in ball_entity.iter() {
-                commands.entity(entity).despawn(); // Remove ball entity
-            }
-            for entity in player_entity.iter() {
-                commands.entity(entity).despawn(); // Remove player entity
-            }
-            for entity in block_entity.iter() {
-                commands.entity(entity).despawn(); // Remove block entities
-            }
         }
     }
 }
 
 fn pause_game(mut time: ResMut<Time<Virtual>>,
               mut commands: Commands,
-              gameover: Query<&GameOver>,
-              mut pause: Query<&mut GamePause>,
+              mut state: ResMut<State>,
               text: Query<Entity, With<PauseText>>,
               keyboard_input: Res<ButtonInput<KeyCode>>) {
 
-    if keyboard_input.just_pressed(KeyCode::Escape) && !gameover.single().unwrap().0 {
-        if time.is_paused() {
-            time.unpause();
-            if let Ok(mut paused) = pause.single_mut() {
-                paused.0 = false; // Set pause state to false
-            }
+    if keyboard_input.just_pressed(KeyCode::Space) {
+        if state.0 == GameState::Paused {
+            state.0 = GameState::Playing; // Set game state to Playing
+            time.unpause(); 
             for entity in text.iter() {
                 commands.entity(entity).despawn(); // Remove pause text
             }
-        } else {
+        } else if state.0 == GameState::Playing {
+            state.0 = GameState::Paused; // Set game state to Paused
             time.pause();
-            if let Ok(mut paused) = pause.single_mut() {
-                paused.0 = true; // Set pause state to true
-            }
             commands.spawn((
                 PauseText,
                 Text2d::new("Paused"),
@@ -264,16 +262,17 @@ fn spawn_blocks(mut commands: Commands,
                 mut mesh_assets: ResMut<Assets<Mesh>>,
                 mut material_assets: ResMut<Assets<ColorMaterial>>) {
 
-    let block_mesh = mesh_assets.add(Rectangle::new(WINDOW_WIDTH / 6.0, WINDOW_HEIGHT / 20.0));
+    let block_mesh = mesh_assets.add(Rectangle::new(BLOCK_WIDTH, BLOCK_HEIGHT));
     let block_material = material_assets.add(Color::srgb(0.0, 0.4, 1.0));
 
     for i in 0..5 {
         for j in 0..5 {
             commands.spawn((
                 Block,
+                DespawnOnGameOver, // This component will be used to despawn blocks on game over
                 Transform::from_xyz(
-                    (i as f32 - 2.0) * (WINDOW_WIDTH / 6.0 + 15.0), // Position blocks in a grid
-                    (j as f32 + 3.0) * (WINDOW_HEIGHT / 20.0 + 10.0),
+                    (i as f32 - 2.0) * (BLOCK_WIDTH + 15.0), // Position blocks in a grid
+                    (j as f32 + 3.0) * (BLOCK_HEIGHT + 10.0),
                     0.0,
                 ),
                 Mesh2d(block_mesh.clone()),
@@ -291,12 +290,16 @@ fn block_collision(mut blocks: Query<(Entity, &Transform), With<Block>>,
     //TODO: Optimize block collision detection
     for (ball_tf, mut vel) in ball.iter_mut() {
         for (block_entity, block_tf) in blocks.iter_mut() {
-            if ball_tf.translation.x >= block_tf.translation.x - WINDOW_WIDTH / 12.0 &&
-               ball_tf.translation.x <= block_tf.translation.x + WINDOW_WIDTH / 12.0 &&
-               ball_tf.translation.y >= block_tf.translation.y - WINDOW_HEIGHT / 40.0 &&
-               ball_tf.translation.y <= block_tf.translation.y + WINDOW_HEIGHT / 40.0 {
+            if ball_tf.translation.x + BALL_SIZE / 2.0 >= block_tf.translation.x - BLOCK_WIDTH / 2.0 &&
+               ball_tf.translation.x - BALL_SIZE / 2.0 <= block_tf.translation.x + BLOCK_WIDTH / 2.0 &&
+               ball_tf.translation.y + BALL_SIZE / 2.0 >= block_tf.translation.y - BLOCK_HEIGHT / 2.0 &&
+               ball_tf.translation.y - BALL_SIZE / 2.0 <= block_tf.translation.y + BLOCK_HEIGHT / 2.0 {
 
                 vel.0.y = -vel.0.y; // Bounce the ball off the block
+
+                let mut rng = rand::thread_rng();
+                vel.0.x = rng.gen_range(-150.0..=150.0);
+
                 commands.entity(block_entity).despawn(); // Remove the block
                 if let Ok((mut score, mut text)) = score.single_mut() {
                     score.0 += 1; // Increment the score
@@ -311,12 +314,10 @@ fn block_collision(mut blocks: Query<(Entity, &Transform), With<Block>>,
 fn game_win(blocks: Query<&Block>,
             mut commands: Commands,
             mut time: ResMut<Time<Virtual>>,
-            gameover: Query<&GameOver>,
-            score: Query<Entity, With<Score>>,
-            ball: Query<Entity, With<Ball>>,
-            player: Query<Entity, With<Player>>) {
+            mut state: ResMut<State>) {
 
-    if blocks.is_empty() && !gameover.single().unwrap().0 {
+    if blocks.is_empty() && state.0 == GameState::Playing {
+        state.0 = GameState::GameWin; // Set game state to GameWin
         time.pause(); // Pause the game when all blocks are destroyed
         commands.spawn((
             GameWinText,
@@ -326,15 +327,34 @@ fn game_win(blocks: Query<&Block>,
                 ..default()
             },
         ));
-       // Despawn player, ball, and score text
-        for entity in ball.iter() {
-            commands.entity(entity).despawn();
+    }
+}
+
+//TODO: Implement a system to handle game state changes
+fn state_handler(state: Res<State>,
+                 mut event_writer: EventWriter<DespawnEvent>) {
+
+    match state.0 {
+        GameState::GameOver => {
+            event_writer.write(DespawnEvent); // Trigger despawn event for game over
         }
-        for entity in player.iter() {
-            commands.entity(entity).despawn();
+        GameState::GameWin => {
+            event_writer.write(DespawnEvent); // Trigger despawn event for game over
         }
-        for entity in score.iter() {
-            commands.entity(entity).despawn();
+        GameState::Paused => {
+            // No action needed for paused state
+        }
+        _ => {}
+    }
+}
+
+fn despawn_handler(mut reader: EventReader<DespawnEvent>,
+                   entities: Query<Entity, With<DespawnOnGameOver>>,
+                   mut commands: Commands) {
+
+    for _ in reader.read(){
+       for entity in entities.iter() {
+            commands.entity(entity).despawn(); // Despawn all entities with the DespawnOnGameOver component
         } 
     }
 }
