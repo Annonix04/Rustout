@@ -311,6 +311,7 @@ fn block_collision(mut blocks: Query<(Entity, &Transform), With<Block>>,
 fn game_win(blocks: Query<&Block>,
             mut commands: Commands,
             mut time: ResMut<Time<Virtual>>,
+            score: Query<Entity, With<Score>>,
             ball: Query<Entity, With<Ball>>,
             player: Query<Entity, With<Player>>) {
 
@@ -331,7 +332,7 @@ fn game_win(blocks: Query<&Block>,
         for entity in player.iter() {
             commands.entity(entity).despawn();
         }
-        for (_, entity) in score.iter() {
+        for entity in score.iter() {
             commands.entity(entity).despawn();
         } 
     }
