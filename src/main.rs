@@ -40,9 +40,6 @@ struct PauseText;
 #[derive(Component)]
 struct GameOverText;
 
-#[derive(Component)]
-struct GameWinText;
-
 #[derive(Resource, Default)]
 struct State(GameState); // Holds the current game state
 
@@ -199,9 +196,8 @@ fn ball_collision(mut balls: Query<(&Transform, &mut Velocity), With<Ball>>,
 
                 vel.0.y = -vel.0.y;
 
-                //TODO: Adjust horizontal velocity based on where the ball hits the paddle
-                let mut rng = rand::thread_rng();
-                vel.0.x = rng.gen_range(-150.0..=150.0);
+                let angle = ball_tf.translation.x - player_tf.translation.x;
+                vel.0.x = angle * 5.0; // Adjust the horizontal velocity based on the hit position
             }
         }
     }
@@ -213,10 +209,10 @@ fn game_over(mut commands: Commands,
              mut state: ResMut<State>,
              transform: Query<&Transform, With<Ball>>) {
 
-        for ball_tf in transform.iter() {
+    for ball_tf in transform.iter() {
         if ball_tf.translation.y < -WINDOW_HEIGHT / 2.0 + BALL_SIZE / 2.0 {
 
-            state.0 = GameState::GameOver; // Set game state to GameOver
+           state.0 = GameState::GameOver; // Set game state to GameOver
            if let Ok(score) = score.single() {
                 commands.spawn((
                     Text2d::new(format!("Game Over!\nYour Score: {}", score.0)),
@@ -287,7 +283,6 @@ fn block_collision(mut blocks: Query<(Entity, &Transform), With<Block>>,
                    mut score: Query<(&mut Score, &mut Text2d), With<Score>>,
                    mut commands: Commands) {
 
-    //TODO: Optimize block collision detection
     for (ball_tf, mut vel) in ball.iter_mut() {
         for (block_entity, block_tf) in blocks.iter_mut() {
             if ball_tf.translation.x + BALL_SIZE / 2.0 >= block_tf.translation.x - BLOCK_WIDTH / 2.0 &&
@@ -320,7 +315,6 @@ fn game_win(blocks: Query<&Block>,
         state.0 = GameState::GameWin; // Set game state to GameWin
         time.pause(); // Pause the game when all blocks are destroyed
         commands.spawn((
-            GameWinText,
             Text2d::new(format!("You Win!")),
             TextFont {
                 font_size: 50.0,
@@ -330,7 +324,6 @@ fn game_win(blocks: Query<&Block>,
     }
 }
 
-//TODO: Implement a system to handle game state changes
 fn state_handler(state: Res<State>,
                  keyboard_input: Res<ButtonInput<KeyCode>>,
                  mut event_writer: EventWriter<DespawnEvent>) {
