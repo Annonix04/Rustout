@@ -190,6 +190,7 @@ fn ball_collision(mut balls: Query<(&Transform, &mut Velocity), With<Ball>>,
 
 // End game if ball hits bottom of screen
 fn game_over(mut commands: Commands,
+             score: Query<&Score>,
              ball_entity: Query<Entity, With<Ball>>, 
              player_entity: Query<Entity, With<Player>>, 
              block_entity: Query<Entity, With<Block>>,
@@ -204,15 +205,15 @@ fn game_over(mut commands: Commands,
             for entity in text.iter() {
                 commands.entity(entity).despawn(); // Remove score text
             }
-            
-            commands.spawn((
-                GameOverText,
-                Text2d::new("Game Over!"),
-                TextFont {
-                    font_size: 50.0,
-                    ..default()
-                },
-            ));
+           if let Ok(score) = score.single() {
+                commands.spawn((
+                    Text2d::new(format!("Game Over!\nYour Score: {}", score.0)),
+                    TextFont {
+                        font_size: 50.0,
+                        ..default()
+                    },
+                ));
+            } 
             for entity in ball_entity.iter() {
                 commands.entity(entity).despawn(); // Remove ball entity
             }
@@ -310,22 +311,19 @@ fn block_collision(mut blocks: Query<(Entity, &Transform), With<Block>>,
 fn game_win(blocks: Query<&Block>,
             mut commands: Commands,
             mut time: ResMut<Time<Virtual>>,
-            score: Query<(&Score, Entity), With<Score>>,
             ball: Query<Entity, With<Ball>>,
             player: Query<Entity, With<Player>>) {
 
     if blocks.is_empty() {
         time.pause(); // Pause the game when all blocks are destroyed
-        if let Ok(score) = score.single() {
-            commands.spawn((
-                GameWinText,
-                Text2d::new(format!("You Win!\nScore: {}", score.0)),
-                TextFont {
-                    font_size: 50.0,
-                    ..default()
-                },
-            ));
-        }
+        commands.spawn((
+            GameWinText,
+            Text2d::new(format!("You Win!")),
+            TextFont {
+                font_size: 50.0,
+                ..default()
+            },
+        ));
        // Despawn player, ball, and score text
         for entity in ball.iter() {
             commands.entity(entity).despawn();
