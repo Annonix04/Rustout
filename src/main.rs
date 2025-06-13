@@ -332,14 +332,21 @@ fn game_win(blocks: Query<&Block>,
 
 //TODO: Implement a system to handle game state changes
 fn state_handler(state: Res<State>,
+                 keyboard_input: Res<ButtonInput<KeyCode>>,
                  mut event_writer: EventWriter<DespawnEvent>) {
 
     match state.0 {
         GameState::GameOver => {
             event_writer.write(DespawnEvent); // Trigger despawn event for game over
+            if keyboard_input.just_pressed(KeyCode::Escape) {
+                std::process::exit(0);
+            }
         }
         GameState::GameWin => {
             event_writer.write(DespawnEvent); // Trigger despawn event for game over
+            if keyboard_input.just_pressed(KeyCode::Escape) {
+                std::process::exit(0);
+            }
         }
         GameState::Paused => {
             // No action needed for paused state
