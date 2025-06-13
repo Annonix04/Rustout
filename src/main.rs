@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use bevy::prelude::*;
 use bevy::window::ExitCondition;
+use bevy::window::CursorOptions;
 use rand::Rng;
 
 #[derive(Component)]
@@ -18,6 +19,21 @@ struct Velocity(Vec2);
 
 #[derive(Component)]
 struct Score(u32); // Represents the player's score
+                   
+#[derive(Component)]
+struct PauseText;
+
+#[derive(Component)]
+struct GameOverText;
+
+#[derive(Component)]
+struct GameWinText;
+
+#[derive(Component)]
+struct GameOver(bool);
+
+#[derive(Component)]
+struct GamePause(bool);
 
 impl Display for Score {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -61,6 +77,7 @@ fn main() {
 
 fn spawn_camera(mut commands: Commands) {
     commands.spawn(Camera2d::default()); // Spawn a 2D camera
+    CursorOptions::default().visible = false;
 }
 
 fn spawn_map(mut commands: Commands,
@@ -102,20 +119,23 @@ fn spawn_map(mut commands: Commands,
             ..default()
         },
     ));
+    commands.spawn(GameOver(false));
+    commands.spawn(GamePause(false));
 }
 
 fn player_movement(mut pos: Query<&mut Transform, With<Player>>,
-                   time: Res<Time<Virtual>>,
+                   pause: Query<&GamePause>,
                    keyboard_input: Res<ButtonInput<KeyCode>>) {
 
+    let paused = if let Ok(paused) = pause.single() { paused.0 } else { false };
     for mut transform in pos.iter_mut() {
         if keyboard_input.pressed(KeyCode::KeyA)
-            && !time.is_paused()
+            && !paused // Check if the game is not paused
             && transform.translation.x > WINDOW_WIDTH / -2.0 + PLAYER_SIZE * 0.75 {
             transform.translation.x -= 5.0; // Move left
         }
         if keyboard_input.pressed(KeyCode::KeyD)
-            && !time.is_paused()
+            && !paused
             && transform.translation.x < WINDOW_WIDTH / 2.0 - PLAYER_SIZE * 0.75 {
             transform.translation.x += 5.0; // Move right
         }
@@ -123,12 +143,17 @@ fn player_movement(mut pos: Query<&mut Transform, With<Player>>,
 }
 
 fn ball_movement(mut ball: Query<(&mut Transform, &mut Velocity), With<Ball>>,
-                 time: Res<Time>) {
+                 time: Res<Time>,
+                 pause: Query<&GamePause>,){
 
     for (mut transform, mut vel) in ball.iter_mut() {
         // Update position
-        transform.translation.x += vel.0.x * time.delta_secs();
-        transform.translation.y += vel.0.y * time.delta_secs();
+        let paused = if let Ok(paused) = pause.single() { paused.0 } else { false };
+        if !paused {
+            // Only update position if the game is not paused
+            transform.translation.x += vel.0.x * time.delta_secs();
+            transform.translation.y += vel.0.y * time.delta_secs();
+        }
 
         // Bounce off walls
         if transform.translation.x < -WINDOW_WIDTH / 2.0 + BALL_SIZE / 2.0 ||
@@ -164,23 +189,24 @@ fn ball_collision(mut balls: Query<(&Transform, &mut Velocity), With<Ball>>,
 }
 
 // End game if ball hits bottom of screen
-fn game_over(mut time: ResMut<Time<Virtual>>,
-             mut commands: Commands,
-             text: Query<Entity, With<Text2d>>,
+fn game_over(mut commands: Commands,
              ball_entity: Query<Entity, With<Ball>>, 
              player_entity: Query<Entity, With<Player>>, 
              block_entity: Query<Entity, With<Block>>,
+             text: Query<Entity, With<Text2d>>,
+             mut gameover: Query<&mut GameOver>,
              transform: Query<&Transform, With<Ball>>) {
 
         for ball_tf in transform.iter() {
         if ball_tf.translation.y < -WINDOW_HEIGHT / 2.0 + BALL_SIZE / 2.0 {
-            
-            for entity in text.iter() {
-                commands.entity(entity).despawn(); //Remove existing UI text
-            }
 
-            time.pause();
+            gameover.single_mut().unwrap().0 = true; // Set game over state
+            for entity in text.iter() {
+                commands.entity(entity).despawn(); // Remove score text
+            }
+            
             commands.spawn((
+                GameOverText,
                 Text2d::new("Game Over!"),
                 TextFont {
                     font_size: 50.0,
@@ -202,19 +228,27 @@ fn game_over(mut time: ResMut<Time<Virtual>>,
 
 fn pause_game(mut time: ResMut<Time<Virtual>>,
               mut commands: Commands,
-              text: Query<Entity, With<Text2d>>,
+              gameover: Query<&GameOver>,
+              mut pause: Query<&mut GamePause>,
+              text: Query<Entity, With<PauseText>>,
               keyboard_input: Res<ButtonInput<KeyCode>>) {
 
-    //TODO: Bug fix - score text disappears when paused
-    if keyboard_input.just_pressed(KeyCode::Escape) {
+    if keyboard_input.just_pressed(KeyCode::Escape) && !gameover.single().unwrap().0 {
         if time.is_paused() {
             time.unpause();
+            if let Ok(mut paused) = pause.single_mut() {
+                paused.0 = false; // Set pause state to false
+            }
             for entity in text.iter() {
                 commands.entity(entity).despawn(); // Remove pause text
             }
         } else {
             time.pause();
+            if let Ok(mut paused) = pause.single_mut() {
+                paused.0 = true; // Set pause state to true
+            }
             commands.spawn((
+                PauseText,
                 Text2d::new("Paused"),
                 TextFont {
                     font_size: 50.0,
@@ -284,6 +318,7 @@ fn game_win(blocks: Query<&Block>,
         time.pause(); // Pause the game when all blocks are destroyed
         if let Ok(score) = score.single() {
             commands.spawn((
+                GameWinText,
                 Text2d::new(format!("You Win!\nScore: {}", score.0)),
                 TextFont {
                     font_size: 50.0,
