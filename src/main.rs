@@ -156,8 +156,8 @@ fn ball_collision(mut balls: Query<(&Transform, &mut Velocity), With<Ball>>,
                 vel.0.y = -vel.0.y;
 
                 //TODO: Adjust horizontal velocity based on where the ball hits the paddle
-                let mut rng = rand::rng();
-                vel.0.x = rng.random_range(-150.0..=150.0);
+                let mut rng = rand::thread_rng();
+                vel.0.x = rng.gen_range(-150.0..=150.0);
             }
         }
     }
