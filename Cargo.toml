@@ -2,13 +2,20 @@
 name = "Rustout"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
 
 [dependencies]
 bevy = "*"
 rand = "*"
 
+[profile.release]
+panic = "abort"
+opt-level = "z"
+lto = "thin"
+
 [profile.dev]
 opt-level = 1
+panic = "unwind"
 
 [profile.dev.package."*"]
 opt-level = 3

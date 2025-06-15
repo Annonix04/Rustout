@@ -1,3 +1,5 @@
+#![cfg_attr(windows, windows_subsystem = "windows")] // Hide console window on Windows
+
 use std::fmt::Display;
 use bevy::prelude::*;
 use bevy::window::ExitCondition;
